@@ -30,6 +30,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# local tooling
+/.claude/
+/.playwright/
+/.playwright-mcp/
+
 # env files (can opt-in for committing if needed)
 .env*
 
