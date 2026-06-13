@@ -4,7 +4,7 @@ import { formatDistanceToNow } from "date-fns";
 import { vi } from "date-fns/locale";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { formatVND, formatDateTime } from "@/lib/utils";
+import { formatETH, formatDateTime } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
@@ -93,7 +93,7 @@ export default async function JobsPage() {
 
                   <div className="mt-4 flex flex-wrap items-center gap-2">
                     <Badge tone="green">
-                      <Wallet size={12} /> {formatVND(job.budget)}
+                      <Wallet size={12} /> {formatETH(job.budget)}
                     </Badge>
                     {job.deadline && (
                       <Badge tone="gray">

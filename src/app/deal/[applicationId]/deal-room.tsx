@@ -5,7 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { DollarSign, Send, Clock, ShieldCheck, Copy, Check, ExternalLink } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { formatVND, formatDateTime, shortHex } from "@/lib/utils";
+import { formatETH, formatDateTime, shortHex, VND_PER_ETH, toEth } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge, OrderStatusBadge } from "@/components/ui/badge";
 import { sendMessage, sendDealRequest, respondDeal, createOrder, respondContract } from "@/app/deal/actions";
@@ -50,7 +50,7 @@ export function DealRoom({
   const [order, setOrder] = useState<OrderCard | null>(initialOrder);
   const [inputMode, setInputMode] = useState<"text" | "price">("text");
   const [textInput, setTextInput] = useState("");
-  const [priceInput, setPriceInput] = useState(String(budget));
+  const [priceInput, setPriceInput] = useState(String(toEth(budget)));
   const [noteInput, setNoteInput] = useState("");
   const [deadlineInput, setDeadlineInput] = useState(
     defaultDeadline ? new Date(defaultDeadline).toISOString().slice(0, 16) : ""
@@ -159,12 +159,12 @@ export function DealRoom({
   }
 
   function handleSendProposal() {
-    const price = Number(priceInput);
-    if (price <= 0) { toast.error("Giá phải lớn hơn 0"); return; }
+    const priceEth = Number(priceInput);
+    if (priceEth <= 0) { toast.error("Giá phải lớn hơn 0"); return; }
     startTransition(async () => {
       const fd = new FormData();
       fd.set("application_id", applicationId);
-      fd.set("proposed_price", String(price));
+      fd.set("proposed_price", String(priceEth * VND_PER_ETH));
       fd.set("note", noteInput);
       fd.set("proposed_deadline", deadlineInput);
       try {
@@ -221,7 +221,7 @@ export function DealRoom({
       {/* Budget bar */}
       <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-2.5">
         <span className="text-xs text-slate-500">Ngân sách gốc</span>
-        <span className="text-sm font-semibold text-slate-900">{formatVND(budget)}</span>
+        <span className="text-sm font-semibold text-slate-900">{formatETH(budget)}</span>
       </div>
 
       {/* Messages */}
@@ -277,7 +277,7 @@ export function DealRoom({
                   <div className="flex items-center gap-1.5">
                     <DollarSign size={15} className={status === "accepted" ? "text-emerald-600" : "text-slate-500"} />
                     <span className={`text-base font-bold ${status === "accepted" ? "text-emerald-700" : "text-slate-900"}`}>
-                      {formatVND(msg.proposed_price ?? 0)}
+                      {formatETH(msg.proposed_price ?? 0)}
                     </span>
                   </div>
                   {status === "accepted" && <Badge tone="green">✓ Đã chốt</Badge>}
@@ -307,7 +307,7 @@ export function DealRoom({
                       variant="outline"
                       disabled={isPending}
                       onClick={() => {
-                        setPriceInput(String(msg.proposed_price ?? budget));
+                        setPriceInput(String(toEth(msg.proposed_price ?? budget)));
                         if (msg.proposed_deadline) {
                           setDeadlineInput(new Date(msg.proposed_deadline).toISOString().slice(0, 16));
                         }
@@ -375,7 +375,7 @@ export function DealRoom({
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs text-slate-500">Giá (VND)</label>
+                  <label className="text-xs text-slate-500">Giá (ETH)</label>
                   <input
                     type="number" min={0} step="any"
                     value={priceInput}
@@ -423,11 +423,11 @@ export function DealRoom({
           )}
           {acceptedProposal ? (
             <p className="mb-3 text-sm font-medium text-emerald-800">
-              Giá đã chốt: {formatVND(acceptedProposal.proposed_price ?? budget)} · Sẵn sàng gửi hợp đồng
+              Giá đã chốt: {formatETH(acceptedProposal.proposed_price ?? budget)} · Sẵn sàng gửi hợp đồng
             </p>
           ) : (
             <p className="mb-2 text-xs text-slate-500">
-              Gửi hợp đồng theo ngân sách gốc ({formatVND(budget)}):
+              Gửi hợp đồng theo ngân sách gốc ({formatETH(budget)}):
             </p>
           )}
           <form action={createOrder} className="flex flex-wrap items-end gap-3">
@@ -467,7 +467,7 @@ export function DealRoom({
       {!orderActive && role === "designer" && acceptedProposal && (
         <div className="border-t border-emerald-100 bg-emerald-50 p-3">
           <p className="text-center text-xs text-emerald-700">
-            ✓ Giá đã chốt {formatVND(acceptedProposal.proposed_price ?? budget)}
+            ✓ Giá đã chốt {formatETH(acceptedProposal.proposed_price ?? budget)}
             {acceptedProposal.proposed_deadline && (
               <> · Deadline: {new Date(acceptedProposal.proposed_deadline).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" })}</>
             )}
@@ -535,7 +535,7 @@ function ContractChatCard({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-            <span className="font-semibold text-emerald-700">{formatVND(order.final_price)}</span>
+            <span className="font-semibold text-emerald-700">{formatETH(order.final_price)}</span>
             <span className="flex items-center gap-1">
               <Clock size={11} /> {formatDateTime(order.deadline)}
             </span>

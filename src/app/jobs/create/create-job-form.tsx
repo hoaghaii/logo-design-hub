@@ -1,16 +1,19 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { createJob, type FormResult } from "@/app/jobs/actions";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import { VND_PER_ETH } from "@/lib/utils";
 
 export function CreateJobForm() {
   const [state, action, pending] = useActionState<FormResult, FormData>(
     createJob,
     null
   );
+  const [budgetEth, setBudgetEth] = useState("");
+  const budgetVnd = Number(budgetEth) * VND_PER_ETH;
 
   return (
     <Card>
@@ -30,16 +33,18 @@ export function CreateJobForm() {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <Label htmlFor="budget">Ngân sách (VND)</Label>
+              <Label htmlFor="budgetEth">Ngân sách (ETH)</Label>
               <Input
-                id="budget"
-                name="budget"
+                id="budgetEth"
                 type="number"
                 min={0}
                 step="any"
                 required
-                placeholder="2000000"
+                placeholder="2"
+                value={budgetEth}
+                onChange={(e) => setBudgetEth(e.target.value)}
               />
+              <input type="hidden" name="budget" value={budgetVnd} />
             </div>
             <div>
               <Label htmlFor="deadline">Deadline gợi ý</Label>

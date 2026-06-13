@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { formatVND, formatDateTime } from "@/lib/utils";
+import { formatETH, formatDateTime } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { OrderStatusBadge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
@@ -65,7 +65,7 @@ export default async function OrdersPage() {
         <StatCard
           icon={<Wallet size={18} />}
           label="Tổng giá trị xong"
-          value={formatVND(totalValue)}
+          value={formatETH(totalValue)}
           tone="slate"
         />
       </div>
@@ -99,7 +99,7 @@ export default async function OrdersPage() {
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
                           <span className="flex items-center gap-1 font-medium text-emerald-700">
-                            <Wallet size={14} /> {formatVND(order.final_price)}
+                            <Wallet size={14} /> {formatETH(order.final_price)}
                           </span>
                           <span className="flex items-center gap-1">
                             <Clock size={14} /> {formatDateTime(order.deadline)}
