@@ -5,7 +5,7 @@ import { formatDistanceToNow } from "date-fns";
 import { vi } from "date-fns/locale";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { formatETH } from "@/lib/utils";
+import { formatETH, toEth } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -101,7 +101,7 @@ export default async function ManageJobsPage() {
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
                       <span className="flex items-center gap-1 font-medium text-emerald-700">
-                        <Wallet size={14} /> {formatETH(job.budget)}
+                        <Wallet size={14} /> {formatETH(toEth(job.budget))}
                       </span>
                       <span className="flex items-center gap-1">
                         <Users size={14} /> {count} ứng viên

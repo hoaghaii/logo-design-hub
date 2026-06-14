@@ -1,0 +1,57 @@
+services:
+
+  # ── 1. Ganache — local Ethereum node ─────────────────────────────────────────
+  ganache:
+    image: trufflesuite/ganache:latest
+    ports:
+      - "8545:8545"          # exposed so MetaMask on host can connect
+    command: >
+      --mnemonic "test test test test test test test test test test test junk"
+      --db /data
+      --port 8545
+      --chain.chainId 1337
+    volumes:
+      - ganache-data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          wget -qO- --post-data='{"jsonrpc":"2.0","method":"net_version","params":[],"id":1}' \
+            --header='Content-Type: application/json' http://localhost:8545 || exit 1
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  # ── 2. Deploy Escrow.sol (runs once then exits) ───────────────────────────────
+  deploy:
+    build:
+      context: ./contracts
+      dockerfile: Dockerfile.deploy
+    depends_on:
+      ganache:
+        condition: service_healthy
+    environment:
+      - GANACHE_URL=http://ganache:8545
+    restart: "no"
+
+  # ── 3. Next.js application ────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      args:
+        # Contract address is deterministic: Account0-nonce0 always gives this address
+        NEXT_PUBLIC_CHAIN_ID: "1337"
+        NEXT_PUBLIC_RPC_URL: "http://localhost:8545"   # browser → host port
+        NEXT_PUBLIC_ESCROW_ADDRESS: "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - deploy
+    environment:
+      RPC_URL: http://ganache:8545              # server-side: stays inside Docker network
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+
+volumes:
+  ganache-data:

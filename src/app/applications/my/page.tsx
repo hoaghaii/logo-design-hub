@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { formatETH, formatDateTime } from "@/lib/utils";
+import { formatETH, formatDateTime, toEth } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, OrderStatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -125,7 +125,7 @@ export default async function MyWorkPage() {
                         </div>
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
                           <span className="flex items-center gap-1 font-medium text-emerald-700">
-                            <Wallet size={13} /> {formatETH(job.budget)}
+                            <Wallet size={13} /> {formatETH(toEth(job.budget))}
                           </span>
                           {job.deadline && (
                             <span className="flex items-center gap-1">

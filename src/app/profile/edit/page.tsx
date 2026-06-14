@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { ProfileForm } from "./profile-form";
+import { LinkWallet } from "./link-wallet";
 
 export default async function EditProfilePage() {
   const user = await getCurrentUser();
@@ -25,6 +26,18 @@ export default async function EditProfilePage() {
             fullName={user.full_name ?? ""}
             bio={user.bio ?? ""}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Ví MetaMask</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="mb-3 text-sm text-slate-500">
+            Liên kết địa chỉ ví để nhận thanh toán qua escrow.
+          </p>
+          <LinkWallet currentAddress={user.wallet_address ?? null} />
         </CardContent>
       </Card>
     </div>

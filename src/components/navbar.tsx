@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { Palette, Wallet, LogOut } from "lucide-react";
+import { Palette, LogOut } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
-import { formatETH } from "@/lib/utils";
 import { signOut } from "@/app/auth/actions";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { NotificationBell } from "@/components/notification-bell";
+import { ConnectWallet } from "@/components/connect-wallet";
 
 export async function Navbar() {
   const user = await getCurrentUser();
@@ -52,10 +52,7 @@ export async function Navbar() {
               ))}
             </div>
 
-            <span className="hidden items-center gap-1.5 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700 sm:flex">
-              <Wallet size={15} />
-              {formatETH(user.wallet_balance)}
-            </span>
+            <ConnectWallet />
 
             <NotificationBell userId={user.id} />
 

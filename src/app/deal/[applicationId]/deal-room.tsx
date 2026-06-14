@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { DollarSign, Send, Clock, ShieldCheck, Copy, Check, ExternalLink } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -46,8 +47,10 @@ export function DealRoom({
   initialOrder: OrderCard | null;
   partnerName: string;
 }) {
+  const router = useRouter();
   const [messages, setMessages] = useState<MsgWithSender[]>(initialMessages);
   const [order, setOrder] = useState<OrderCard | null>(initialOrder);
+  const [redirectOrderId, setRedirectOrderId] = useState<string | null>(null);
   const [inputMode, setInputMode] = useState<"text" | "price">("text");
   const [textInput, setTextInput] = useState("");
   const [priceInput, setPriceInput] = useState(String(toEth(budget)));
@@ -124,7 +127,11 @@ export function DealRoom({
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "orders", filter: `job_id=eq.${jobId}` },
         (payload) => {
-          setOrder((prev) => (prev ? { ...prev, ...(payload.new as Partial<OrderCard>) } : (payload.new as OrderCard)));
+          const updated = payload.new as OrderCard;
+          setOrder((prev) => (prev ? { ...prev, ...updated } : updated));
+          if (updated.status === "pending_escrow") {
+            setRedirectOrderId((prev) => prev ?? updated.id);
+          }
         }
       )
       .subscribe();
@@ -160,11 +167,11 @@ export function DealRoom({
 
   function handleSendProposal() {
     const priceEth = Number(priceInput);
-    if (priceEth <= 0) { toast.error("Giá phải lớn hơn 0"); return; }
+    if (priceEth <= 0 || isNaN(priceEth)) { toast.error("Giá phải lớn hơn 0"); return; }
     startTransition(async () => {
       const fd = new FormData();
       fd.set("application_id", applicationId);
-      fd.set("proposed_price", String(priceEth * VND_PER_ETH));
+      fd.set("proposed_price", String(priceEth)); // stored as ETH directly
       fd.set("note", noteInput);
       fd.set("proposed_deadline", deadlineInput);
       try {
@@ -202,11 +209,11 @@ export function DealRoom({
       fd.set("decision", decision);
       try {
         await respondContract(fd);
-        toast.success(
-          decision === "accept"
-            ? "Đã chấp nhận hợp đồng! Chờ client ký quỹ."
-            : "Đã từ chối hợp đồng."
-        );
+        if (decision === "accept") {
+          setRedirectOrderId((prev) => prev ?? order.id);
+        } else {
+          toast.success("Đã từ chối hợp đồng.");
+        }
       } catch (e: unknown) {
         toast.error(e instanceof Error ? e.message : "Lỗi");
       }
@@ -217,11 +224,13 @@ export function DealRoom({
   const orderActive = !!order && order.status !== "declined";
 
   return (
+    <>
+    {redirectOrderId && <CountdownRedirect orderId={redirectOrderId} router={router} />}
     <div className="mt-6 flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       {/* Budget bar */}
       <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-2.5">
         <span className="text-xs text-slate-500">Ngân sách gốc</span>
-        <span className="text-sm font-semibold text-slate-900">{formatETH(budget)}</span>
+        <span className="text-sm font-semibold text-slate-900">{formatETH(toEth(budget))}</span>
       </div>
 
       {/* Messages */}
@@ -277,7 +286,7 @@ export function DealRoom({
                   <div className="flex items-center gap-1.5">
                     <DollarSign size={15} className={status === "accepted" ? "text-emerald-600" : "text-slate-500"} />
                     <span className={`text-base font-bold ${status === "accepted" ? "text-emerald-700" : "text-slate-900"}`}>
-                      {formatETH(msg.proposed_price ?? 0)}
+                      {formatETH(msg.proposed_price ?? 0)}  {/* proposed_price stored as ETH */}
                     </span>
                   </div>
                   {status === "accepted" && <Badge tone="green">✓ Đã chốt</Badge>}
@@ -307,7 +316,7 @@ export function DealRoom({
                       variant="outline"
                       disabled={isPending}
                       onClick={() => {
-                        setPriceInput(String(toEth(msg.proposed_price ?? budget)));
+                        setPriceInput(String(msg.proposed_price ?? toEth(budget)));
                         if (msg.proposed_deadline) {
                           setDeadlineInput(new Date(msg.proposed_deadline).toISOString().slice(0, 16));
                         }
@@ -423,16 +432,16 @@ export function DealRoom({
           )}
           {acceptedProposal ? (
             <p className="mb-3 text-sm font-medium text-emerald-800">
-              Giá đã chốt: {formatETH(acceptedProposal.proposed_price ?? budget)} · Sẵn sàng gửi hợp đồng
+              Giá đã chốt: {formatETH(acceptedProposal.proposed_price ?? toEth(budget))} · Sẵn sàng gửi hợp đồng
             </p>
           ) : (
             <p className="mb-2 text-xs text-slate-500">
-              Gửi hợp đồng theo ngân sách gốc ({formatETH(budget)}):
+              Gửi hợp đồng theo ngân sách gốc ({formatETH(toEth(budget))}):
             </p>
           )}
           <form action={createOrder} className="flex flex-wrap items-end gap-3">
             <input type="hidden" name="application_id" value={applicationId} />
-            <input type="hidden" name="final_price" value={acceptedProposal?.proposed_price ?? budget} />
+            <input type="hidden" name="final_price" value={acceptedProposal ? (acceptedProposal.proposed_price ?? toEth(budget)) : toEth(budget)} />
             <div className="flex flex-col gap-1">
               <label className="text-xs text-slate-500">Deadline</label>
               <input
@@ -467,7 +476,7 @@ export function DealRoom({
       {!orderActive && role === "designer" && acceptedProposal && (
         <div className="border-t border-emerald-100 bg-emerald-50 p-3">
           <p className="text-center text-xs text-emerald-700">
-            ✓ Giá đã chốt {formatETH(acceptedProposal.proposed_price ?? budget)}
+            ✓ Giá đã chốt {formatETH(acceptedProposal.proposed_price ?? toEth(budget))}
             {acceptedProposal.proposed_deadline && (
               <> · Deadline: {new Date(acceptedProposal.proposed_deadline).toLocaleString("vi-VN", { dateStyle: "short", timeStyle: "short" })}</>
             )}
@@ -476,6 +485,7 @@ export function DealRoom({
         </div>
       )}
     </div>
+    </>
   );
 }
 
@@ -535,7 +545,7 @@ function ContractChatCard({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-            <span className="font-semibold text-emerald-700">{formatETH(order.final_price)}</span>
+            <span className="font-semibold text-emerald-700">{formatETH(order.final_price)}</span>  {/* final_price stored as ETH */}
             <span className="flex items-center gap-1">
               <Clock size={11} /> {formatDateTime(order.deadline)}
             </span>
@@ -589,6 +599,53 @@ function ContractChatCard({
             </p>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Countdown redirect modal ─────────────────────────────────────────────────
+
+function CountdownRedirect({
+  orderId,
+  router,
+}: {
+  orderId: string;
+  router: ReturnType<typeof useRouter>;
+}) {
+  const [count, setCount] = useState(3);
+
+  useEffect(() => {
+    if (count <= 0) {
+      router.push(`/orders/${orderId}/escrow`);
+      return;
+    }
+    const t = setTimeout(() => setCount((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [count, orderId, router]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="mx-4 w-full max-w-sm rounded-2xl bg-white p-8 text-center shadow-2xl">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
+          <ShieldCheck size={28} className="text-emerald-600" />
+        </div>
+        <h2 className="text-lg font-semibold text-slate-900">
+          Hợp đồng đã được chấp nhận!
+        </h2>
+        <p className="mt-2 text-sm text-slate-500">
+          Đang chuẩn bị chuyển hướng sang trang Escrow…
+        </p>
+        <div className="mt-6">
+          <span className="text-6xl font-bold text-emerald-600">{count}</span>
+          <p className="mt-1 text-xs text-slate-400">giây</p>
+        </div>
+        <button
+          onClick={() => router.push(`/orders/${orderId}/escrow`)}
+          className="mt-6 w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
+        >
+          Chuyển hướng ngay →
+        </button>
       </div>
     </div>
   );

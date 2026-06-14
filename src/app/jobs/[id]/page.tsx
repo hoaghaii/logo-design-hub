@@ -14,7 +14,7 @@ import { formatDistanceToNow } from "date-fns";
 import { vi } from "date-fns/locale";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
-import { formatETH, formatDateTime } from "@/lib/utils";
+import { formatETH, formatDateTime, toEth } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,7 +144,7 @@ export default async function JobDetailPage({ params }: PageProps<"/jobs/[id]">)
                     <Wallet size={13} /> Ngân sách
                   </p>
                   <p className="mt-1 text-lg font-bold text-slate-900">
-                    {formatETH(job.budget)}
+                    {formatETH(toEth(job.budget))}
                   </p>
                 </div>
                 <div className="rounded-xl bg-slate-50 p-3">
@@ -338,7 +338,7 @@ export default async function JobDetailPage({ params }: PageProps<"/jobs/[id]">)
                 <div className="mt-3 space-y-3 text-sm">
                   <Row icon={<Wallet size={15} />} label="Ngân sách">
                     <span className="font-semibold text-emerald-700">
-                      {formatETH(job.budget)}
+                      {formatETH(toEth(job.budget))}
                     </span>
                   </Row>
                   <Row icon={<Clock size={15} />} label="Deadline">

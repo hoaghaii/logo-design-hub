@@ -16,8 +16,8 @@ export function formatVND(amount: number): string {
 }
 
 /**
- * Mock ETH conversion rate: 1 ETH = 1,000,000 internal units (VND).
- * DB stores values as VND; escrow UI displays in ETH for crypto UX.
+ * Legacy VND→ETH conversion (still used for jobs.budget display only).
+ * All new money values (final_price, proposed_price, tx.amount) are stored as ETH.
  */
 export const VND_PER_ETH = 1_000_000;
 
@@ -25,8 +25,9 @@ export function toEth(vnd: number): number {
   return vnd / VND_PER_ETH;
 }
 
-export function formatETH(vnd: number, decimals = 4): string {
-  return toEth(vnd).toFixed(decimals) + " ETH";
+/** Format an ETH amount for display. Value must already be in ETH (e.g. 0.5). */
+export function formatETH(eth: number, decimals = 4): string {
+  return eth.toFixed(decimals) + " ETH";
 }
 
 /** Build a deterministic mock contract address from an order id. */

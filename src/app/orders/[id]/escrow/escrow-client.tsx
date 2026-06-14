@@ -6,33 +6,27 @@ import {
   AlertTriangle,
   Check,
   Copy,
-  ExternalLink,
-  Fuel,
+  Download,
   Loader2,
   Lock,
   ShieldCheck,
-  Wallet,
-  Download,
   UploadCloud,
+  Wallet,
   X,
-  Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ethers } from "ethers";
 import { createClient } from "@/lib/supabase/client";
-import {
-  formatETH,
-  toEth,
-  VND_PER_ETH,
-  formatDateTime,
-  shortHex,
-} from "@/lib/utils";
+import { formatETH, formatDateTime, shortHex } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { OrderStatusBadge } from "@/components/ui/badge";
+import { useWallet } from "@/lib/web3/use-wallet";
+import { getEscrowContract } from "@/lib/web3/contract";
 import {
-  lockEscrow,
-  releaseEscrow,
-  rejectEscrow,
+  confirmFunded,
+  confirmReleased,
+  confirmRefunded,
   submitDeliverable,
 } from "@/app/orders/actions";
 import type { OrderStatus, TransactionRow, DeliverableRow } from "@/lib/types";
@@ -45,22 +39,6 @@ type OrderLite = {
   deadline: string;
 };
 
-type GasDetails = {
-  gasLimit: number;
-  baseFeeGwei: number;
-  priorityFeeGwei: number;
-  gasCostEth: number;
-};
-
-function generateGas(): GasDetails {
-  const gasLimit = 65_000;
-  // Randomise each time so it feels live.
-  const baseFeeGwei = parseFloat((Math.random() * 15 + 10).toFixed(2));
-  const priorityFeeGwei = parseFloat((Math.random() * 2 + 0.5).toFixed(2));
-  const gasCostEth = (gasLimit * (baseFeeGwei + priorityFeeGwei)) / 1e9;
-  return { gasLimit, baseFeeGwei, priorityFeeGwei, gasCostEth };
-}
-
 const TX_LABEL: Record<string, string> = {
   escrow_lock: "Nạp vào Escrow",
   escrow_release: "Giải ngân",
@@ -70,21 +48,48 @@ const TX_LABEL: Record<string, string> = {
 export function EscrowClient({
   order,
   role,
-  walletBalance,
   counterpartyName,
+  designerWalletAddress: initialDesignerWallet,
+  designerId,
   transactions,
   deliverable,
   downloadUrl,
 }: {
   order: OrderLite;
   role: "client" | "designer";
-  walletBalance: number;
   counterpartyName: string;
+  designerWalletAddress: string | null;
+  designerId: string;
   transactions: TransactionRow[];
   deliverable: DeliverableRow | null;
   downloadUrl: string | null;
 }) {
   const router = useRouter();
+  const { refreshBalance } = useWallet();
+  const [designerWalletAddress, setDesignerWalletAddress] = useState(initialDesignerWallet);
+
+  // Keep state in sync if server re-renders with fresh prop (e.g. after router.refresh())
+  useEffect(() => {
+    setDesignerWalletAddress(initialDesignerWallet);
+  }, [initialDesignerWallet]);
+
+  // Realtime: watch for designer linking wallet after escrow is created
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`designer_wallet:${designerId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "users", filter: `id=eq.${designerId}` },
+        (payload) => {
+          const addr = (payload.new as { wallet_address?: string | null }).wallet_address ?? null;
+          setDesignerWalletAddress(addr);
+          if (addr) toast.success("Designer vừa liên kết ví — bạn có thể ký quỹ ngay!");
+        }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [designerId]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -93,7 +98,14 @@ export function EscrowClient({
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "orders", filter: `id=eq.${order.id}` },
-        () => router.refresh()
+        (payload) => {
+          router.refresh();
+          const newStatus = (payload.new as { status?: string }).status;
+          // Designer receives ETH on completed; client gets refund on rejected/refunded
+          if (newStatus === "completed" || newStatus === "rejected" || newStatus === "refunded") {
+            refreshBalance();
+          }
+        }
       )
       .on(
         "postgres_changes",
@@ -104,7 +116,6 @@ export function EscrowClient({
     return () => { supabase.removeChannel(channel); };
   }, [order.id, router]);
 
-  // Pre-escrow handshake states: contract isn't funded-ready yet.
   if (order.status === "pending_acceptance" || order.status === "declined") {
     const awaiting = order.status === "pending_acceptance";
     return (
@@ -117,8 +128,8 @@ export function EscrowClient({
             </h2>
             <p className="mt-1 text-sm text-slate-600">
               {awaiting
-                ? `Hợp đồng đã được gửi tới ${counterpartyName}. Khi được chấp nhận, bạn có thể ký quỹ vào escrow.`
-                : `${counterpartyName} đã từ chối hợp đồng này. Vào phòng deal để điều chỉnh và gửi lại.`}
+                ? `Hợp đồng đã gửi tới ${counterpartyName}. Khi được chấp nhận, bạn có thể ký quỹ.`
+                : `${counterpartyName} đã từ chối hợp đồng. Vào phòng deal để điều chỉnh và gửi lại.`}
             </p>
           </CardContent>
         </Card>
@@ -130,7 +141,7 @@ export function EscrowClient({
     <div className="mt-6 space-y-6">
       <div className="grid gap-4 sm:grid-cols-2">
         <ContractCard order={order} />
-        <WalletCard balance={walletBalance} price={order.final_price} />
+        <WalletCard price={order.final_price} />
       </div>
 
       <StepTracker status={order.status} />
@@ -138,8 +149,8 @@ export function EscrowClient({
       <ActionPanel
         order={order}
         role={role}
-        walletBalance={walletBalance}
         counterpartyName={counterpartyName}
+        designerWalletAddress={designerWalletAddress}
         deliverable={deliverable}
         downloadUrl={downloadUrl}
       />
@@ -147,9 +158,7 @@ export function EscrowClient({
       {transactions.length > 0 && (
         <Card>
           <CardContent>
-            <h2 className="mb-3 text-sm font-semibold text-slate-700">
-              Lịch sử giao dịch
-            </h2>
+            <h2 className="mb-3 text-sm font-semibold text-slate-700">Lịch sử giao dịch</h2>
             <div className="space-y-2">
               {transactions.map((tx) => (
                 <div
@@ -165,13 +174,18 @@ export function EscrowClient({
                         {shortHex(tx.tx_hash)}
                       </span>
                     )}
+                    {tx.from_address && (
+                      <span className="font-mono text-[11px] text-slate-300">
+                        from {shortHex(tx.from_address)}
+                      </span>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="font-semibold text-slate-900">
                       {formatETH(tx.amount)}
                     </p>
                     <p className="text-xs text-slate-400">
-                      ≈ {(toEth(tx.amount) * 3500).toLocaleString("en-US", { style: "currency", currency: "USD" })}
+                      ≈ ${(tx.amount * 3500).toLocaleString("en-US", { maximumFractionDigits: 2 })}
                     </p>
                   </div>
                 </div>
@@ -184,7 +198,7 @@ export function EscrowClient({
   );
 }
 
-// ---------- Contract header card ----------
+// ─── Contract header card ─────────────────────────────────────────────────────
 
 function ContractCard({ order }: { order: OrderLite }) {
   const [copied, setCopied] = useState(false);
@@ -201,7 +215,7 @@ function ContractCard({ order }: { order: OrderLite }) {
       <div className="flex items-center gap-2 bg-slate-900 px-5 py-3 text-slate-300">
         <ShieldCheck size={15} className="text-emerald-400" />
         <span className="text-xs font-medium uppercase tracking-wide">
-          Smart Contract · Mock Chain
+          Smart Contract · Ganache Local
         </span>
         <span className="ml-auto flex items-center gap-1.5 text-[11px] text-emerald-400">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
@@ -210,9 +224,7 @@ function ContractCard({ order }: { order: OrderLite }) {
       </div>
       <CardContent>
         <div className="flex items-center justify-between gap-2">
-          <code className="font-mono text-sm text-slate-800">
-            {shortHex(addr, 8, 6)}
-          </code>
+          <code className="font-mono text-sm text-slate-800">{shortHex(addr, 8, 6)}</code>
           <button
             onClick={copy}
             className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-emerald-600"
@@ -222,25 +234,18 @@ function ContractCard({ order }: { order: OrderLite }) {
         </div>
         <div className="mt-3 flex items-center justify-between">
           <OrderStatusBadge status={order.status} />
-          <span className="text-xs text-slate-400">
-            Hạn: {formatDateTime(order.deadline)}
-          </span>
+          <span className="text-xs text-slate-400">Hạn: {formatDateTime(order.deadline)}</span>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-// ---------- Wallet card ----------
+// ─── Wallet card (reads from MetaMask) ───────────────────────────────────────
 
-function WalletCard({ balance, price }: { balance: number; price: number }) {
-  const ethBalance = toEth(balance);
-  const ethPrice = toEth(price);
-  const usdBalance = (ethBalance * 3500).toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+function WalletCard({ price }: { price: number }) {
+  const { account, balance, isCorrectChain, connect, switchChain } = useWallet();
+  const ethBalance = parseFloat(balance ?? "0");
 
   return (
     <Card>
@@ -248,33 +253,51 @@ function WalletCard({ balance, price }: { balance: number; price: number }) {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-slate-500">
             <Wallet size={16} />
-            <span className="text-xs font-medium uppercase tracking-wide">
-              Ví của bạn
-            </span>
+            <span className="text-xs font-medium uppercase tracking-wide">Ví MetaMask</span>
           </div>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-            MockNet
-          </span>
-        </div>
-        <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
-          {ethBalance.toFixed(4)}{" "}
-          <span className="text-lg font-semibold text-slate-400">ETH</span>
-        </p>
-        <p className="text-xs text-slate-400">{usdBalance}</p>
-        <div className="mt-3 border-t border-slate-100 pt-3">
-          <p className="text-xs text-slate-500">
-            Giá trị hợp đồng:{" "}
-            <span className="font-semibold text-slate-700">
-              {ethPrice.toFixed(4)} ETH
+          {account && (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-500">
+              {shortHex(account)}
             </span>
-          </p>
+          )}
         </div>
+
+        {account ? (
+          <>
+            {!isCorrectChain ? (
+              <button
+                onClick={switchChain}
+                className="mt-2 flex items-center gap-1.5 text-sm font-medium text-amber-600 hover:underline"
+              >
+                <AlertTriangle size={13} /> Sai mạng — click để switch
+              </button>
+            ) : (
+              <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
+                {ethBalance.toFixed(4)}{" "}
+                <span className="text-lg font-semibold text-slate-400">ETH</span>
+              </p>
+            )}
+            <div className="mt-3 border-t border-slate-100 pt-3">
+              <p className="text-xs text-slate-500">
+                Giá trị hợp đồng:{" "}
+                <span className="font-semibold text-slate-700">{formatETH(price)}</span>
+              </p>
+            </div>
+          </>
+        ) : (
+          <button
+            onClick={connect}
+            className="mt-3 flex items-center gap-1.5 text-sm font-medium text-emerald-600 hover:underline"
+          >
+            <Wallet size={14} /> Connect MetaMask
+          </button>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-// ---------- 6-step tracker ----------
+// ─── 6-step tracker ───────────────────────────────────────────────────────────
 
 type StepState = "done" | "active" | "pending" | "failed";
 
@@ -387,20 +410,20 @@ function StepIcon({ state }: { state: StepState }) {
   );
 }
 
-// ---------- Action panel ----------
+// ─── Action panel ─────────────────────────────────────────────────────────────
 
 function ActionPanel({
   order,
   role,
-  walletBalance,
   counterpartyName,
+  designerWalletAddress,
   deliverable,
   downloadUrl,
 }: {
   order: OrderLite;
   role: "client" | "designer";
-  walletBalance: number;
   counterpartyName: string;
+  designerWalletAddress: string | null;
   deliverable: DeliverableRow | null;
   downloadUrl: string | null;
 }) {
@@ -411,8 +434,7 @@ function ActionPanel({
       <FundEscrowButton
         orderId={order.id}
         finalPrice={order.final_price}
-        walletBalance={walletBalance}
-        contractAddress={order.contract_address}
+        designerWalletAddress={designerWalletAddress}
       />
     ) : (
       <InfoCard text={`Chờ ${counterpartyName} ký quỹ vào escrow.`} />
@@ -445,9 +467,7 @@ function ActionPanel({
           {role === "client" ? (
             <ReviewButtons orderId={order.id} />
           ) : (
-            <p className="mt-3 text-sm text-slate-500">
-              Chờ {counterpartyName} duyệt sản phẩm.
-            </p>
+            <p className="mt-3 text-sm text-slate-500">Chờ {counterpartyName} duyệt sản phẩm.</p>
           )}
         </CardContent>
       </Card>
@@ -455,9 +475,7 @@ function ActionPanel({
   }
 
   if (status === "completed")
-    return (
-      <ResultCard tone="success" title="Hoàn thành 🎉" text="Escrow đã giải ngân cho designer." />
-    );
+    return <ResultCard tone="success" title="Hoàn thành 🎉" text="Escrow đã giải ngân cho designer." />;
   if (status === "rejected")
     return (
       <ResultCard
@@ -472,292 +490,195 @@ function ActionPanel({
       <ResultCard
         tone="danger"
         title="Đã hoàn tiền"
-        text="Quá hạn deadline — escrow tự động hoàn tiền về client."
+        text="Escrow hoàn tiền về client."
         locked={deliverable?.is_locked}
       />
     );
   return null;
 }
 
-// ---------- Fund escrow button + confirmation modal ----------
+// ─── Fund escrow button (MetaMask) ───────────────────────────────────────────
 
 function FundEscrowButton({
   orderId,
   finalPrice,
-  walletBalance,
-  contractAddress,
+  designerWalletAddress,
 }: {
   orderId: string;
   finalPrice: number;
-  walletBalance: number;
-  contractAddress: string | null;
+  designerWalletAddress: string | null;
 }) {
-  const [showModal, setShowModal] = useState(false);
-  const [gas, setGas] = useState<GasDetails | null>(null);
   const [loading, setLoading] = useState(false);
+  const { account, balance, isCorrectChain, connect, switchChain, refreshBalance } = useWallet();
+  const ethBalance = parseFloat(balance ?? "0");
+  const insufficient = account !== null && balance !== null && ethBalance < finalPrice;
 
-  function openModal() {
-    setGas(generateGas());
-    setShowModal(true);
-  }
+  async function handleFund() {
+    if (!account) { await connect(); return; }
+    if (!isCorrectChain) { await switchChain(); return; }
+    if (!designerWalletAddress) {
+      toast.error("Designer chưa liên kết ví MetaMask. Yêu cầu họ vào hồ sơ để link ví trước.");
+      return;
+    }
 
-  async function confirm() {
     setLoading(true);
-    // Mimic on-chain confirmation delay.
-    await new Promise((r) => setTimeout(r, 2200));
+    const tid = toast.loading("Chờ MetaMask xác nhận...");
     try {
-      await lockEscrow(orderId);
-      toast.success("Giao dịch đã được xác nhận — tiền vào Escrow!");
-      setShowModal(false);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Ký quỹ thất bại");
+      const provider = new ethers.BrowserProvider(window.ethereum as ethers.Eip1193Provider);
+      const signer = await provider.getSigner();
+      const contract = getEscrowContract(signer);
+
+      const dealId = ethers.keccak256(ethers.toUtf8Bytes(orderId));
+      const value  = ethers.parseEther(finalPrice.toString());
+
+      const tx = await contract.fund(dealId, designerWalletAddress, { value });
+      toast.loading("Chờ xác nhận trên chain...", { id: tid });
+
+      const receipt = await tx.wait();
+      await confirmFunded(orderId, receipt.hash);
+      await refreshBalance();
+      toast.success("Đã khoá tiền vào Escrow!", { id: tid });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Ký quỹ thất bại";
+      toast.error(msg.includes("user rejected") ? "Đã hủy giao dịch" : msg, { id: tid });
       setLoading(false);
     }
   }
 
-  const ethAmount = toEth(finalPrice);
-  const gasCostEth = gas?.gasCostEth ?? 0;
-  const totalEth = ethAmount + gasCostEth;
-  const balanceAfterEth = toEth(walletBalance) - totalEth;
-  const addr = contractAddress ?? "0x0000000000000000000000000000000000000000";
-
   return (
-    <>
-      <Card>
-        <CardContent>
-          <h2 className="text-sm font-semibold text-slate-700">Ký quỹ vào Escrow</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Số tiền sẽ bị khóa trong hợp đồng cho đến khi bạn duyệt sản phẩm.
-          </p>
-          <div className="mt-3 flex items-center gap-3">
-            <div className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs text-slate-400">Số tiền cần ký quỹ</p>
-              <p className="mt-0.5 text-xl font-bold text-slate-900">
-                {ethAmount.toFixed(4)}{" "}
-                <span className="text-base font-semibold text-slate-400">ETH</span>
-              </p>
-              <p className="text-xs text-slate-400">
-                ≈ {(ethAmount * 3500).toLocaleString("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                  maximumFractionDigits: 0,
-                })}
-              </p>
-            </div>
-          </div>
-          <Button onClick={openModal} className="mt-4" size="lg">
-            <Lock size={18} /> Ký quỹ vào Escrow
-          </Button>
-        </CardContent>
-      </Card>
+    <Card>
+      <CardContent>
+        <h2 className="text-sm font-semibold text-slate-700">Ký quỹ vào Escrow</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Tiền sẽ bị khóa trong smart contract cho đến khi bạn duyệt sản phẩm.
+        </p>
 
-      {showModal && gas && (
-        <EscrowConfirmModal
-          contractAddress={addr}
-          ethAmount={ethAmount}
-          gas={gas}
-          totalEth={totalEth}
-          balanceAfterEth={balanceAfterEth}
-          loading={loading}
-          onConfirm={confirm}
-          onCancel={() => setShowModal(false)}
-        />
-      )}
-    </>
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <p className="text-xs text-slate-400">Số tiền ký quỹ</p>
+          <p className="mt-0.5 text-2xl font-bold text-slate-900">
+            {finalPrice.toFixed(4)}{" "}
+            <span className="text-lg font-semibold text-slate-400">ETH</span>
+          </p>
+          <p className="text-xs text-slate-400">
+            ≈ ${(finalPrice * 3500).toLocaleString("en-US", { maximumFractionDigits: 0 })} USD
+          </p>
+        </div>
+
+        {account && balance !== null && (
+          <div className={`mt-2 flex items-center justify-between rounded-lg px-3 py-2 text-xs ${insufficient ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>
+            <span>Số dư ví: {ethBalance.toFixed(4)} ETH</span>
+            {insufficient && (
+              <span className="flex items-center gap-1">
+                <AlertTriangle size={12} /> Không đủ số dư
+              </span>
+            )}
+          </div>
+        )}
+
+        {!designerWalletAddress && (
+          <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            <AlertTriangle size={12} />
+            Designer chưa liên kết ví — chưa thể ký quỹ
+          </div>
+        )}
+
+        {!account ? (
+          <Button onClick={connect} className="mt-4" size="lg">
+            <Wallet size={18} /> Connect MetaMask
+          </Button>
+        ) : !isCorrectChain ? (
+          <Button onClick={switchChain} className="mt-4" size="lg" variant="outline">
+            <AlertTriangle size={18} /> Switch sang Ganache Local
+          </Button>
+        ) : (
+          <Button
+            onClick={handleFund}
+            disabled={loading || insufficient || !designerWalletAddress}
+            className="mt-4"
+            size="lg"
+          >
+            {loading ? (
+              <><Loader2 size={18} className="animate-spin" /> Đang xử lý...</>
+            ) : (
+              <><Lock size={18} /> Ký quỹ qua MetaMask</>
+            )}
+          </Button>
+        )}
+
+        <p className="mt-2 text-[11px] text-slate-400">
+          MetaMask sẽ hiển thị popup xác nhận với phí gas thực tế.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 
-function EscrowConfirmModal({
-  contractAddress,
-  ethAmount,
-  gas,
-  totalEth,
-  balanceAfterEth,
-  loading,
-  onConfirm,
-  onCancel,
-}: {
-  contractAddress: string;
-  ethAmount: number;
-  gas: GasDetails;
-  totalEth: number;
-  balanceAfterEth: number;
-  loading: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  const insufficient = balanceAfterEth < 0;
+// ─── Review buttons (MetaMask) ────────────────────────────────────────────────
+
+function ReviewButtons({ orderId }: { orderId: string }) {
+  const [busy, setBusy] = useState(false);
+  const { account, isCorrectChain, connect, switchChain, refreshBalance } = useWallet();
+
+  async function decide(kind: "release" | "refund") {
+    if (!account) { await connect(); return; }
+    if (!isCorrectChain) { await switchChain(); return; }
+
+    setBusy(true);
+    const tid = toast.loading("Chờ MetaMask xác nhận...");
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum as ethers.Eip1193Provider);
+      const signer   = await provider.getSigner();
+      const contract = getEscrowContract(signer);
+      const dealId   = ethers.keccak256(ethers.toUtf8Bytes(orderId));
+
+      const tx = kind === "release"
+        ? await contract.release(dealId)
+        : await contract.refund(dealId);
+
+      toast.loading("Chờ xác nhận trên chain...", { id: tid });
+      const receipt = await tx.wait();
+
+      if (kind === "release") {
+        await confirmReleased(orderId, receipt.hash);
+        await refreshBalance();
+        toast.success("Đã giải ngân cho designer!", { id: tid });
+      } else {
+        await confirmRefunded(orderId, receipt.hash);
+        await refreshBalance();
+        toast.success("Đã từ chối & hoàn tiền.", { id: tid });
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Thao tác thất bại";
+      toast.error(msg.includes("user rejected") ? "Đã hủy giao dịch" : msg, { id: tid });
+      setBusy(false);
+    }
+  }
+
+  if (!account) {
+    return (
+      <div className="mt-4">
+        <Button onClick={connect} variant="outline">
+          <Wallet size={16} /> Connect MetaMask để thực hiện
+        </Button>
+      </div>
+    );
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={() => !loading && onCancel()}
-      />
-
-      {/* Modal */}
-      <div className="relative w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/10">
-        {/* Header */}
-        <div className="bg-slate-900 px-5 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/20 ring-1 ring-emerald-500/40">
-                <ShieldCheck size={16} className="text-emerald-400" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-white">Xác nhận giao dịch</p>
-                <p className="text-[11px] text-slate-400">MockNet · EscrowProtocol v2</p>
-              </div>
-            </div>
-            <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-400 ring-1 ring-emerald-500/20">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-              Kết nối
-            </span>
-          </div>
-        </div>
-
-        {/* Body */}
-        <div className="px-5 py-4">
-          {/* To */}
-          <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5">
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
-                Gửi đến hợp đồng
-              </p>
-              <code className="mt-0.5 block font-mono text-xs font-medium text-slate-700">
-                {shortHex(contractAddress, 10, 8)}
-              </code>
-            </div>
-            <ExternalLink size={13} className="text-slate-300" />
-          </div>
-
-          {/* Amount */}
-          <div className="mt-4 text-center">
-            <p className="text-3xl font-bold tracking-tight text-slate-900">
-              {ethAmount.toFixed(4)}{" "}
-              <span className="text-xl font-semibold text-slate-400">ETH</span>
-            </p>
-            <p className="mt-0.5 text-sm text-slate-400">
-              ≈ {(ethAmount * 3500).toLocaleString("en-US", {
-                style: "currency",
-                currency: "USD",
-              })}
-            </p>
-          </div>
-
-          {/* Gas breakdown */}
-          <div className="mt-4 rounded-xl border border-slate-200 divide-y divide-slate-100">
-            <div className="flex items-center justify-between px-3 py-2">
-              <span className="flex items-center gap-1.5 text-xs text-slate-500">
-                <Fuel size={12} className="text-slate-400" /> Gas limit
-              </span>
-              <span className="font-mono text-xs font-medium text-slate-700">
-                {gas.gasLimit.toLocaleString()}
-              </span>
-            </div>
-            <div className="flex items-center justify-between px-3 py-2">
-              <span className="flex items-center gap-1.5 text-xs text-slate-500">
-                <Zap size={12} className="text-orange-400" /> Base fee
-              </span>
-              <span className="font-mono text-xs font-medium text-slate-700">
-                {gas.baseFeeGwei.toFixed(2)} Gwei
-              </span>
-            </div>
-            <div className="flex items-center justify-between px-3 py-2">
-              <span className="flex items-center gap-1.5 text-xs text-slate-500">
-                <Zap size={12} className="text-emerald-400" /> Priority fee
-              </span>
-              <span className="font-mono text-xs font-medium text-slate-700">
-                {gas.priorityFeeGwei.toFixed(2)} Gwei
-              </span>
-            </div>
-            <div className="flex items-center justify-between bg-slate-50 px-3 py-2">
-              <span className="text-xs font-medium text-slate-600">
-                Phí gas ước tính
-              </span>
-              <div className="text-right">
-                <p className="font-mono text-xs font-semibold text-slate-800">
-                  {gas.gasCostEth.toFixed(6)} ETH
-                </p>
-                <p className="text-[10px] text-slate-400">
-                  ≈ ${(gas.gasCostEth * 3500).toFixed(2)}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Total */}
-          <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3">
-            <span className="text-sm font-medium text-slate-300">Tổng thanh toán</span>
-            <div className="text-right">
-              <p className="font-mono text-base font-bold text-white">
-                {totalEth.toFixed(4)} ETH
-              </p>
-              <p className="text-[11px] text-slate-400">
-                ≈ ${(totalEth * 3500).toFixed(2)}
-              </p>
-            </div>
-          </div>
-
-          {/* Balance after */}
-          <div className={`mt-2 flex items-center justify-between rounded-lg px-3 py-2 ${
-            insufficient ? "bg-rose-50" : "bg-emerald-50"
-          }`}>
-            <span className="text-xs text-slate-500">Số dư sau giao dịch</span>
-            <span className={`font-mono text-xs font-semibold ${
-              insufficient ? "text-rose-600" : "text-emerald-700"
-            }`}>
-              {balanceAfterEth < 0 ? "-" : ""}{Math.abs(balanceAfterEth).toFixed(4)} ETH
-            </span>
-          </div>
-
-          {insufficient && (
-            <div className="mt-2 flex items-center gap-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
-              <AlertTriangle size={13} />
-              Số dư không đủ để thực hiện giao dịch này.
-            </div>
-          )}
-
-          {/* Warning */}
-          <p className="mt-3 text-[11px] text-slate-400 leading-relaxed">
-            Tiền sẽ bị khóa trong hợp đồng cho đến khi bạn duyệt hoặc từ chối sản phẩm. Giao dịch không thể hoàn tác.
-          </p>
-        </div>
-
-        {/* Footer */}
-        <div className="flex gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4">
-          <button
-            onClick={onCancel}
-            disabled={loading}
-            className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50"
-          >
-            Hủy bỏ
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={loading || insufficient}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white shadow-sm shadow-emerald-600/30 transition-colors hover:bg-emerald-700 disabled:opacity-60"
-          >
-            {loading ? (
-              <>
-                <Loader2 size={15} className="animate-spin" />
-                Đang xác nhận...
-              </>
-            ) : (
-              <>
-                <Lock size={15} />
-                Xác nhận & Ký quỹ
-              </>
-            )}
-          </button>
-        </div>
-      </div>
+    <div className="mt-4 flex gap-2">
+      <Button variant="success" disabled={busy} onClick={() => decide("release")}>
+        {busy ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+        Duyệt & Giải ngân
+      </Button>
+      <Button variant="danger" disabled={busy} onClick={() => decide("refund")}>
+        {busy ? <Loader2 size={16} className="animate-spin" /> : <X size={16} />}
+        Từ chối & Hoàn tiền
+      </Button>
     </div>
   );
 }
 
-// ---------- Submit deliverable ----------
+// ─── Submit deliverable ───────────────────────────────────────────────────────
 
 function SubmitDeliverable({ orderId }: { orderId: string }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -770,7 +691,7 @@ function SubmitDeliverable({ orderId }: { orderId: string }) {
     setBusy(true);
     try {
       const supabase = createClient();
-      const ext = file.name.split(".").pop();
+      const ext  = file.name.split(".").pop();
       const path = `${orderId}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("deliverables")
@@ -806,40 +727,7 @@ function SubmitDeliverable({ orderId }: { orderId: string }) {
   );
 }
 
-// ---------- Review buttons ----------
-
-function ReviewButtons({ orderId }: { orderId: string }) {
-  const [busy, setBusy] = useState(false);
-
-  async function decide(kind: "release" | "reject") {
-    setBusy(true);
-    try {
-      if (kind === "release") {
-        await releaseEscrow(orderId);
-        toast.success("Đã giải ngân cho designer!");
-      } else {
-        await rejectEscrow(orderId);
-        toast.success("Đã từ chối & hoàn tiền.");
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Thao tác thất bại");
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="mt-4 flex gap-2">
-      <Button variant="success" disabled={busy} onClick={() => decide("release")}>
-        <Check size={16} /> Duyệt & Giải ngân
-      </Button>
-      <Button variant="danger" disabled={busy} onClick={() => decide("reject")}>
-        <X size={16} /> Từ chối & Hoàn tiền
-      </Button>
-    </div>
-  );
-}
-
-// ---------- Utility cards ----------
+// ─── Utility cards ────────────────────────────────────────────────────────────
 
 function InfoCard({ text }: { text: string }) {
   return (
@@ -865,11 +753,7 @@ function ResultCard({
   return (
     <Card>
       <CardContent
-        className={
-          tone === "success"
-            ? "border-l-4 border-emerald-500"
-            : "border-l-4 border-rose-500"
-        }
+        className={tone === "success" ? "border-l-4 border-emerald-500" : "border-l-4 border-rose-500"}
       >
         <h2 className="font-semibold text-slate-900">{title}</h2>
         <p className="mt-1 text-sm text-slate-600">{text}</p>
@@ -882,3 +766,4 @@ function ResultCard({
     </Card>
   );
 }
+

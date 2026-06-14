@@ -367,10 +367,12 @@ export type Database = {
           amount: number
           contract_address: string | null
           created_at: string
+          from_address: string | null
           from_user_id: string | null
           id: string
           order_id: string
           status: Database["public"]["Enums"]["tx_status"]
+          to_address: string | null
           to_user_id: string | null
           tx_hash: string | null
           type: Database["public"]["Enums"]["tx_type"]
@@ -379,10 +381,12 @@ export type Database = {
           amount: number
           contract_address?: string | null
           created_at?: string
+          from_address?: string | null
           from_user_id?: string | null
           id?: string
           order_id: string
           status?: Database["public"]["Enums"]["tx_status"]
+          to_address?: string | null
           to_user_id?: string | null
           tx_hash?: string | null
           type: Database["public"]["Enums"]["tx_type"]
@@ -391,10 +395,12 @@ export type Database = {
           amount?: number
           contract_address?: string | null
           created_at?: string
+          from_address?: string | null
           from_user_id?: string | null
           id?: string
           order_id?: string
           status?: Database["public"]["Enums"]["tx_status"]
+          to_address?: string | null
           to_user_id?: string | null
           tx_hash?: string | null
           type?: Database["public"]["Enums"]["tx_type"]
@@ -432,6 +438,7 @@ export type Database = {
           full_name: string | null
           id: string
           role: Database["public"]["Enums"]["user_role"]
+          wallet_address: string | null
           wallet_balance: number
         }
         Insert: {
@@ -442,6 +449,7 @@ export type Database = {
           full_name?: string | null
           id: string
           role?: Database["public"]["Enums"]["user_role"]
+          wallet_address?: string | null
           wallet_balance?: number
         }
         Update: {
@@ -452,6 +460,7 @@ export type Database = {
           full_name?: string | null
           id?: string
           role?: Database["public"]["Enums"]["user_role"]
+          wallet_address?: string | null
           wallet_balance?: number
         }
         Relationships: []
@@ -535,13 +544,13 @@ export type Tables<
     : never
   : DefaultSchemaTableNameOrOptions extends keyof (DefaultSchema["Tables"] &
         DefaultSchema["Views"])
-  ? (DefaultSchema["Tables"] &
-      DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
-      Row: infer R
-    }
-    ? R
+    ? (DefaultSchema["Tables"] &
+        DefaultSchema["Views"])[DefaultSchemaTableNameOrOptions] extends {
+        Row: infer R
+      }
+      ? R
+      : never
     : never
-  : never
 
 export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
@@ -561,12 +570,12 @@ export type TablesInsert<
     ? I
     : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-  ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-      Insert: infer I
-    }
-    ? I
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Insert: infer I
+      }
+      ? I
+      : never
     : never
-  : never
 
 export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
@@ -586,12 +595,12 @@ export type TablesUpdate<
     ? U
     : never
   : DefaultSchemaTableNameOrOptions extends keyof DefaultSchema["Tables"]
-  ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
-      Update: infer U
-    }
-    ? U
+    ? DefaultSchema["Tables"][DefaultSchemaTableNameOrOptions] extends {
+        Update: infer U
+      }
+      ? U
+      : never
     : never
-  : never
 
 export type Enums<
   DefaultSchemaEnumNameOrOptions extends
@@ -607,8 +616,8 @@ export type Enums<
 }
   ? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"][EnumName]
   : DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema["Enums"]
-  ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
-  : never
+    ? DefaultSchema["Enums"][DefaultSchemaEnumNameOrOptions]
+    : never
 
 export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
@@ -624,8 +633,8 @@ export type CompositeTypes<
 }
   ? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"][CompositeTypeName]
   : PublicCompositeTypeNameOrOptions extends keyof DefaultSchema["CompositeTypes"]
-  ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
-  : never
+    ? DefaultSchema["CompositeTypes"][PublicCompositeTypeNameOrOptions]
+    : never
 
 export const Constants = {
   public: {

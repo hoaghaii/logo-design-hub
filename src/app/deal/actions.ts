@@ -73,7 +73,7 @@ export async function sendDealRequest(formData: FormData): Promise<void> {
   if (user.id !== parties.designer_id && user.id !== parties.client_id) {
     throw new Error("Not a party to this deal");
   }
-  if (price <= 0) throw new Error("Giá đề xuất không hợp lệ");
+  if (price <= 0 || isNaN(price)) throw new Error("Giá đề xuất không hợp lệ");
 
   const supabase = await createClient();
 
