@@ -1,0 +1,79 @@
+[
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "dealId", "type": "bytes32" },
+      { "internalType": "address", "name": "designer", "type": "address" }
+    ],
+    "name": "fund",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "dealId", "type": "bytes32" }
+    ],
+    "name": "release",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "dealId", "type": "bytes32" }
+    ],
+    "name": "refund",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "internalType": "bytes32", "name": "", "type": "bytes32" }
+    ],
+    "name": "deals",
+    "outputs": [
+      { "internalType": "address", "name": "client", "type": "address" },
+      { "internalType": "address", "name": "designer", "type": "address" },
+      { "internalType": "uint256", "name": "amount", "type": "uint256" },
+      { "internalType": "uint8", "name": "state", "type": "uint8" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true,  "internalType": "bytes32", "name": "dealId",   "type": "bytes32" },
+      { "indexed": true,  "internalType": "address", "name": "client",   "type": "address" },
+      { "indexed": true,  "internalType": "address", "name": "designer", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "amount",   "type": "uint256" }
+    ],
+    "name": "Funded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true,  "internalType": "bytes32", "name": "dealId",   "type": "bytes32" },
+      { "indexed": true,  "internalType": "address", "name": "designer", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "amount",   "type": "uint256" }
+    ],
+    "name": "Released",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true,  "internalType": "bytes32", "name": "dealId", "type": "bytes32" },
+      { "indexed": true,  "internalType": "address", "name": "client", "type": "address" },
+      { "indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256" }
+    ],
+    "name": "Refunded",
+    "type": "event"
+  },
+  { "inputs": [], "name": "DealExists",    "type": "error" },
+  { "inputs": [], "name": "DealNotFunded", "type": "error" },
+  { "inputs": [], "name": "NotClient",     "type": "error" },
+  { "inputs": [], "name": "ZeroAmount",    "type": "error" }
+]

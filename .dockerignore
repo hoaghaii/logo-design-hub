@@ -1,0 +1,11 @@
+.env
+.env.local
+node_modules
+.next
+ganache-data
+contracts/node_modules
+contracts/artifacts
+contracts/cache
+contracts/typechain-types
+.git
+*.md

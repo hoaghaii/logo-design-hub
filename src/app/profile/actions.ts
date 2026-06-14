@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth";
 
 export type FormResult = { error: string } | { ok: true } | null;
@@ -50,6 +50,34 @@ export async function addPortfolio(formData: FormData): Promise<void> {
 
   revalidatePath("/profile/edit");
   revalidatePath(`/profile/${user.id}`);
+}
+
+export async function linkWallet(address: string): Promise<FormResult> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Bạn cần đăng nhập." };
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address))
+    return { error: "Địa chỉ ví không hợp lệ." };
+
+  const normalized = address.toLowerCase();
+  const admin = createAdminClient();
+
+  // Release this wallet from any other account that currently holds it
+  await admin
+    .from("users")
+    .update({ wallet_address: null })
+    .eq("wallet_address", normalized)
+    .neq("id", user.id);
+
+  const { error } = await admin
+    .from("users")
+    .update({ wallet_address: normalized })
+    .eq("id", user.id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/profile/edit");
+  revalidatePath(`/profile/${user.id}`);
+  return { ok: true };
 }
 
 export async function deletePortfolio(formData: FormData): Promise<void> {

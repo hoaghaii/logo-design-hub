@@ -16,7 +16,7 @@ export default async function EscrowPage({
   const { data: order } = await supabase
     .from("orders")
     .select(
-      "*, client:users!orders_client_id_fkey(full_name), designer:users!orders_designer_id_fkey(full_name), job:jobs(title)"
+      "*, client:users!orders_client_id_fkey(full_name, wallet_address), designer:users!orders_designer_id_fkey(full_name, wallet_address), job:jobs(title)"
     )
     .eq("id", id)
     .single();
@@ -40,7 +40,6 @@ export default async function EscrowPage({
       .maybeSingle(),
   ]);
 
-  // Issue a short-lived signed URL for an unlocked deliverable.
   let downloadUrl: string | null = null;
   if (deliverable && !deliverable.is_locked) {
     const { data: signed } = await supabase.storage
@@ -79,12 +78,13 @@ export default async function EscrowPage({
           deadline: order.deadline,
         }}
         role={isClient ? "client" : "designer"}
-        walletBalance={user.wallet_balance}
         counterpartyName={
           isClient
             ? order.designer?.full_name ?? "Designer"
             : order.client?.full_name ?? "Client"
         }
+        designerWalletAddress={order.designer?.wallet_address ?? null}
+        designerId={order.designer_id}
         transactions={transactions ?? []}
         deliverable={deliverable ?? null}
         downloadUrl={downloadUrl}
