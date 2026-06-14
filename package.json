@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "deploy:local": "cd contracts && npx hardhat run scripts/deploy.ts --network ganache",
-    "dev:web3": "npm run deploy:local && npm run dev"
+    "setup:web3": "node scripts/setup-web3.mjs",
+    "dev:web3": "node scripts/setup-web3.mjs && next dev"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
